@@ -145,7 +145,7 @@ class WarpFrame(gym.ObservationWrapper):
         self._grayscale = grayscale
         self._key = dict_space_key
         if self._grayscale:
-            num_colors = 1
+            num_colors = 4
         else:
             num_colors = 3
 
@@ -169,19 +169,22 @@ class WarpFrame(gym.ObservationWrapper):
         else:
             frame = obs[self._key]
 
-        if self._grayscale:
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
         frame = cv2.resize(
             frame, (self._width, self._height), interpolation=cv2.INTER_AREA
         )
+
         if self._grayscale:
-            frame = np.expand_dims(frame, -1)
+            frame_g = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        if self._grayscale:
+            frame_g = np.expand_dims(frame_g, -1)
+            # Add the RGB frame once again
+            np.append(frame_g, frame, axis=-1)
 
         if self._key is None:
-            obs = frame
+            obs = frame_g
         else:
             obs = obs.copy()
-            obs[self._key] = frame
+            obs[self._key] = frame_g
         return obs
 
 
@@ -279,6 +282,7 @@ def wrap_deepmind(env, episode_life=True, clip_rewards=True, frame_stack=False, 
         env = EpisodicLifeEnv(env)
     if 'FIRE' in env.unwrapped.get_action_meanings():
         env = FireResetEnv(env)
+    # Dont change the shape of the frame right now, but make BW and RGB
     env = WarpFrame(env)
     if scale:
         env = ScaledFloatFrame(env)
