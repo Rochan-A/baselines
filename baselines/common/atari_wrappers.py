@@ -178,7 +178,7 @@ class WarpFrame(gym.ObservationWrapper):
         if self._grayscale:
             frame_g = np.expand_dims(frame_g, -1)
             # Add the RGB frame once again
-            np.append(frame_g, frame, axis=-1)
+            frame_g = np.append(frame_g, frame, axis=-1)
 
         if self._key is None:
             obs = frame_g
