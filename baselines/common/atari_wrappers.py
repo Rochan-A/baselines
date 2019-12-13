@@ -145,7 +145,7 @@ class WarpFrame(gym.ObservationWrapper):
         self._grayscale = grayscale
         self._key = dict_space_key
         if self._grayscale:
-            num_colors = 4
+            num_colors = 3
         else:
             num_colors = 3
 
