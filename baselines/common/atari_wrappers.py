@@ -16,6 +16,9 @@ import torch.optim as optim
 from skimage import segmentation
 import skimage.color as color
 
+NUM_OBJECTS = 3		# MODIFIED FOR EXTERNAL OBJECT SET
+NUM_DUP = 1		# MODIFIED FOR EXTERNAL OBJECT SET
+
 class NoopResetEnv(gym.Wrapper):
     def __init__(self, env, noop_max=30):
         """Sample initial states by taking random number of no-ops on reset.
@@ -233,6 +236,7 @@ class WarpFrame(gym.ObservationWrapper):
                 frame_slic = segmentation.slic(frame_g, n_segments=5)
                 frame_g = color.label2rgb(frame_slic, frame_g, kind='avg')
 
+# TODO
 #            if self.use_unsup_segm:
 #                if self.count == 5:
 #                    self.segm_model.apply(init_weights)
@@ -263,29 +267,29 @@ class WarpFrame(gym.ObservationWrapper):
             obs[self._key] = frame_g
         return obs
 
-# TODO
 class WarpFrame_feov(gym.ObservationWrapper):
-    def __init__(self, env, width=84, height=84, grayscale=True,
-                    dict_space_key=None):
+    def __init__(self, env, num_objects=None, object_set=None, dict_space_key=None):
         """
+        NOTE: Use Feature Extraction for Object Detection to generate vector
+              space.
+
         Warp frames to 84x84 as done in the Nature paper and later work.
 
         If the environment uses dictionary observations, `dict_space_key` can be specified which indicates which
         observation should be warped.
         """
         super().__init__(env)
-        self._width = width
-        self._height = height
-        self._grayscale = grayscale
         self._key = dict_space_key
+        self._num_objects = num_objects
 
-        num_colors = 1
+        assert object_set != None
+        self.object_set = np.load(object_set, allow_pickle=True)
 
         new_space = gym.spaces.Box(
-            low=0,
-            high=255,
-            shape=(self._height, self._width, num_colors),
-            dtype=np.uint8,
+            low=-1.0,
+            high=1.0,
+            shape=(self._num_objects*2,),
+            dtype=np.float32,
         )
 
         if self._key is None:
@@ -296,28 +300,110 @@ class WarpFrame_feov(gym.ObservationWrapper):
             self.observation_space.spaces[self._key] = new_space
         assert original_space.dtype == np.uint8 and len(original_space.shape) == 3
 
+    def objectify(self, image):
+        """
+        Takes a new frame from the game and uses template matching to identify
+        the objects present in the frame
+        """
+        # All the 6 methods for comparison in a list
+        methods = ['cv2.TM_CCOEFF', 'cv2.TM_CCOEFF_NORMED', 'cv2.TM_CCORR',
+                'cv2.TM_CCORR_NORMED', 'cv2.TM_SQDIFF', 'cv2.TM_SQDIFF_NORMED']
+
+        image = image.astype(np.uint8)
+        assert (image.dtype == np.uint8), 'Data type of frame not integer'
+        #imc = copy.copy(image)
+
+        obj_loc = dict()
+        count = 0
+        typE = 0
+        # Iterate over all the objects in our memory
+        for i, obj in enumerate(self.object_set):
+            # grab the spatial dimensions of the kernel
+            (kH, kW) = obj.shape[:2]
+
+            try:
+                # Apply template Matching
+                res = cv2.matchTemplate(image, obj, cv2.TM_CCOEFF_NORMED)
+            except:
+                res = np.zeros((1))
+
+            # Keep threshold to select objects
+            threshold = 0.7
+            loc = np.where( res >= threshold)
+            mul_objs = list()
+            for pt in zip(*loc[::-1]):
+                mul_objs.append((pt[0], pt[1]))
+            f = 0
+            # Save the multiple objects only if their number is between 1 and 9
+            if len(mul_objs) > 0:
+                #for obj_count, val in enumerate(mul_objs):
+                #    if obj_count < NUM_DUP:
+                #        cv2.rectangle(imc, (val[0], val[1]), (val[0] + kW, val[1] + kH), (0,0,255), 2)
+                obj_loc[i] = mul_objs[:NUM_DUP]
+                count += len(mul_objs[:NUM_DUP])
+                f = 1
+
+            if f == 1 : typE += 1
+            #cv2.imshow('Objects on Frame', imc)
+            #cv2.waitKey(10)
+        return obj_loc
+
+    # Preprocess object dictionary for training
+    def obj_preprocess(self, state):
+        """
+        Identify all objects in the particular frame
+        """
+        loc = []
+        for _, val in enumerate(state):
+            loc.append(self.objectify(val))
+
+        # READ THE EXTERNAL OBJECT LIST
+        # 0: Ball
+        # 1: Left Panel
+        # 2: Right Panel
+
+        # Actions for Pong
+        # 0 : do nothing
+        # 1 : do nothing
+        # 2 : Up            Distance will be positive
+        # 3 : Down          Distance will be negative
+
+        # object_set has all the objects in it.
+        # obj_loc contains all the locations for each object for a BATCH_SIZE
+        a = np.ones((NUM_DUP * NUM_OBJECTS * 2), dtype=np.float32)
+
+        for k, val in enumerate(loc):
+            for key, value in val.items():
+                if key < NUM_OBJECTS:
+                    if value:
+                        for i, pos in enumerate(value):
+                            a[(key*2*NUM_DUP) + (i*2)] = pos[0]/self._width
+                            a[(key*2*NUM_DUP) + (i*2) + 1] = pos[1]/self._height
+
+        return a
+
     def observation(self, obs):
         if self._key is None:
             frame = obs
         else:
             frame = obs[self._key]
 
-        frame_g = cv2.resize(
-            frame, (self._width, self._height), interpolation=cv2.INTER_AREA
+        self._width = frame.shape[1]
+        self._height = frame.shape[0]
+
+        frame = frame[30:]
+
+        frame = cv2.resize(
+            frame, (self._width*2, self._height*2), interpolation=cv2.INTER_AREA
         )
 
-        #if self._grayscale:
-        #    frame_g = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-        #if self._grayscale:
-        #    frame_g = np.expand_dims(frame_g, -1)
-            # Add the RGB frame once again
-            #frame_g = np.append(frame_g, frame, axis=-1)
+        frame = self.obj_preprocess([frame])
 
         if self._key is None:
-            obs = frame_g
+            obs = frame
         else:
             obs = obs.copy()
-            obs[self._key] = frame_g
+            obs[self._key] = frame
         return obs
 
 class FrameStack(gym.Wrapper):
@@ -409,7 +495,8 @@ def make_atari(env_id, max_episode_steps=None):
 
 def wrap_deepmind(env, episode_life=True, clip_rewards=True, frame_stack=False,
                             scale=False, use_rgb=False, use_segm=False,
-                                    use_unsup_segm=False, use_feov=False):
+                            use_unsup_segm=False, use_feov=False,
+                            num_objects=None, object_set=None):
     """Configure environment for DeepMind-style Atari.
     """
     if episode_life:
@@ -418,7 +505,7 @@ def wrap_deepmind(env, episode_life=True, clip_rewards=True, frame_stack=False,
         env = FireResetEnv(env)
 
     if use_feov:
-        env = WarpFrame_feov(env)
+        env = WarpFrame_feov(env, num_objects=num_objects, object_set=object_set)
     elif (use_rgb or use_segm or use_unsup_segm):
         env = WarpFrame(env, use_rgb=use_rgb, use_segm=use_segm,
                 use_unsup_segm=use_unsup_segm)
