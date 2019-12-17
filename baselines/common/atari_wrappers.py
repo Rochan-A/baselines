@@ -393,10 +393,6 @@ class WarpFrame_feov(gym.ObservationWrapper):
 
         frame = frame[30:]
 
-        frame = cv2.resize(
-            frame, (self._width*2, self._height*2), interpolation=cv2.INTER_AREA
-        )
-
         frame = self.obj_preprocess([frame])
 
         if self._key is None:
