@@ -286,10 +286,10 @@ class WarpFrame_feov(gym.ObservationWrapper):
         self.object_set = np.load(object_set, allow_pickle=True)
 
         new_space = gym.spaces.Box(
-            low=-1.0,
-            high=1.0,
+            low=0,
+            high=180,
             shape=(self._num_objects*2,),
-            dtype=np.float32,
+            dtype=np.uint8,
         )
 
         if self._key is None:
@@ -370,15 +370,15 @@ class WarpFrame_feov(gym.ObservationWrapper):
 
         # object_set has all the objects in it.
         # obj_loc contains all the locations for each object for a BATCH_SIZE
-        a = np.ones((NUM_DUP * NUM_OBJECTS * 2), dtype=np.float32)
+        a = np.zeros((NUM_DUP * NUM_OBJECTS * 2), dtype=np.uint8)
 
         for k, val in enumerate(loc):
             for key, value in val.items():
                 if key < NUM_OBJECTS:
                     if value:
                         for i, pos in enumerate(value):
-                            a[(key*2*NUM_DUP) + (i*2)] = pos[0]/self._width
-                            a[(key*2*NUM_DUP) + (i*2) + 1] = pos[1]/self._height
+                            a[(key*2*NUM_DUP) + (i*2)] = pos[0]#/self._width
+                            a[(key*2*NUM_DUP) + (i*2) + 1] = pos[1]#/self._height
 
         return a
 
