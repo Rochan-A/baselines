@@ -292,7 +292,7 @@ class WarpFrame_feov(gym.ObservationWrapper):
             dtype=np.uint8,
         )
 
-        self.frame_his = np.zeros((4, self._num_objects*2))
+        self.frame_his = np.zeros((4, self._num_objects*2), dtype=np.uint8)
 
         if self._key is None:
             original_space = self.observation_space
