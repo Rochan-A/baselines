@@ -288,9 +288,11 @@ class WarpFrame_feov(gym.ObservationWrapper):
         new_space = gym.spaces.Box(
             low=0,
             high=180,
-            shape=(self._num_objects*2,),
+            shape=(4, self._num_objects*2),
             dtype=np.uint8,
         )
+
+        self.frame_his = np.zeros((4, self._num_objects*2))
 
         if self._key is None:
             original_space = self.observation_space
@@ -388,6 +390,8 @@ class WarpFrame_feov(gym.ObservationWrapper):
         else:
             frame = obs[self._key]
 
+        self.frame_his = np.roll(self.frame_his, 1, axis=0)
+
         self._width = frame.shape[1]
         self._height = frame.shape[0]
 
@@ -395,11 +399,13 @@ class WarpFrame_feov(gym.ObservationWrapper):
 
         frame = self.obj_preprocess([frame])
 
+        self.frame_his[0] = frame
+
         if self._key is None:
-            obs = frame
+            obs = self.frame_his
         else:
             obs = obs.copy()
-            obs[self._key] = frame
+            obs[self._key] = self.frame_his
         return obs
 
 class FrameStack(gym.Wrapper):
