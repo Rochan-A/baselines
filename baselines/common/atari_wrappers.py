@@ -1,5 +1,5 @@
 import numpy as np
-import os
+import os, copy
 os.environ.setdefault('PATH', '')
 from collections import deque
 import gym
@@ -14,6 +14,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from skimage import segmentation
+from skimage.measure import compare_ssim as ssim
 import skimage.color as color
 
 NUM_OBJECTS = 3		# MODIFIED FOR EXTERNAL OBJECT SET
@@ -282,17 +283,17 @@ class WarpFrame_feov(gym.ObservationWrapper):
         self._key = dict_space_key
         self._num_objects = num_objects
 
-        assert object_set != None
-        self.object_set = np.load(object_set, allow_pickle=True)
+        #assert object_set != None
+        #self.object_set = np.load(object_set, allow_pickle=True)
 
         new_space = gym.spaces.Box(
             low=0,
             high=180,
-            shape=(4, self._num_objects*2),
+            shape=(6, ),
             dtype=np.uint8,
         )
 
-        self.frame_his = np.zeros((4, self._num_objects*2), dtype=np.uint8)
+        #self.frame_his = np.zeros((4, self._num_objects*2), dtype=np.uint8)
 
         if self._key is None:
             original_space = self.observation_space
@@ -302,110 +303,103 @@ class WarpFrame_feov(gym.ObservationWrapper):
             self.observation_space.spaces[self._key] = new_space
         assert original_space.dtype == np.uint8 and len(original_space.shape) == 3
 
-    def objectify(self, image):
-        """
-        Takes a new frame from the game and uses template matching to identify
-        the objects present in the frame
-        """
-        # All the 6 methods for comparison in a list
-        methods = ['cv2.TM_CCOEFF', 'cv2.TM_CCOEFF_NORMED', 'cv2.TM_CCORR',
-                'cv2.TM_CCORR_NORMED', 'cv2.TM_SQDIFF', 'cv2.TM_SQDIFF_NORMED']
-
-        image = image.astype(np.uint8)
-        assert (image.dtype == np.uint8), 'Data type of frame not integer'
-        #imc = copy.copy(image)
-
-        obj_loc = dict()
-        count = 0
-        typE = 0
-        # Iterate over all the objects in our memory
-        for i, obj in enumerate(self.object_set):
-            # grab the spatial dimensions of the kernel
-            (kH, kW) = obj.shape[:2]
-
-            try:
-                # Apply template Matching
-                res = cv2.matchTemplate(image, obj, cv2.TM_CCOEFF_NORMED)
-            except:
-                res = np.zeros((1))
-
-            # Keep threshold to select objects
-            threshold = 0.7
-            loc = np.where( res >= threshold)
-            mul_objs = list()
-            for pt in zip(*loc[::-1]):
-                mul_objs.append((pt[0], pt[1]))
-            f = 0
-            # Save the multiple objects only if their number is between 1 and 9
-            if len(mul_objs) > 0:
-                #for obj_count, val in enumerate(mul_objs):
-                #    if obj_count < NUM_DUP:
-                #        cv2.rectangle(imc, (val[0], val[1]), (val[0] + kW, val[1] + kH), (0,0,255), 2)
-                obj_loc[i] = mul_objs[:NUM_DUP]
-                count += len(mul_objs[:NUM_DUP])
-                f = 1
-
-            if f == 1 : typE += 1
-            #cv2.imshow('Objects on Frame', imc)
-            #cv2.waitKey(10)
-        return obj_loc
-
-    # Preprocess object dictionary for training
-    def obj_preprocess(self, state):
-        """
-        Identify all objects in the particular frame
-        """
-        loc = []
-        for _, val in enumerate(state):
-            loc.append(self.objectify(val))
-
-        # READ THE EXTERNAL OBJECT LIST
-        # 0: Ball
-        # 1: Left Panel
-        # 2: Right Panel
-
-        # Actions for Pong
-        # 0 : do nothing
-        # 1 : do nothing
-        # 2 : Up            Distance will be positive
-        # 3 : Down          Distance will be negative
-
-        # object_set has all the objects in it.
-        # obj_loc contains all the locations for each object for a BATCH_SIZE
-        a = np.zeros((NUM_DUP * NUM_OBJECTS * 2), dtype=np.uint8)
-
-        for k, val in enumerate(loc):
-            for key, value in val.items():
-                if key < NUM_OBJECTS:
-                    if value:
-                        for i, pos in enumerate(value):
-                            a[(key*2*NUM_DUP) + (i*2)] = pos[0]#/self._width
-                            a[(key*2*NUM_DUP) + (i*2) + 1] = pos[1]#/self._height
-
-        return a
-
     def observation(self, obs):
         if self._key is None:
             frame = obs
         else:
             frame = obs[self._key]
 
-        self.frame_his = np.roll(self.frame_his, 1, axis=0)
+        vector = np.zeros((6), dtype=np.uint8)
 
-        self._width = frame.shape[1]
-        self._height = frame.shape[0]
+        ob = frame[40:190]
 
-        frame = frame[30:]
+        image_ = ob.reshape(-1, ob.shape[-1])
+        pix_values, _, _ = np.unique(image_, axis=0, return_index=True, return_counts = True)
 
-        frame = self.obj_preprocess([frame])
+        _, counts = np.unique(image_, axis=0, return_counts = True)
 
-        self.frame_his[0] = frame
+        #[[144  72  17]
+        # [213 130  74]
+        # [236 236 236]]
+
+        unique = np.delete(pix_values, np.where(counts == max(counts)), axis= 0)
+
+        # Extract the location using the above pixel values
+        # Array to store cordinates of boxes
+        objs = []
+        objects = []
+
+        for i, peak in enumerate(unique):
+            # First we create a mask selecting all the pixels of this unqiue color
+            mask = cv2.inRange(ob, peak, peak)
+
+            # And use it to extract the corresponding part of the original colour image
+            blob = cv2.bitwise_and(ob, ob, mask=mask)
+            contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+            for j, contour in enumerate(contours):
+                bbox = cv2.boundingRect(contour)
+                # Create a mask for this contour
+                contour_mask = np.zeros_like(mask)
+                cv2.drawContours(contour_mask, contours, j, 255, -1)
+
+                # Extract the pixels belonging to this contour
+                result = cv2.bitwise_and(blob, blob, mask=contour_mask)
+                # And draw a bounding box
+                top_left, bottom_right = (bbox[0], bbox[1]), (bbox[0]+bbox[2], bbox[1]+bbox[3])
+
+                # Save the box to a list (only if box size is greater than 8x8)
+                if bottom_right[1] - top_left[1] > 2 and bottom_right[0] - top_left[0] > 2:
+                    objs.append([top_left, bottom_right])
+
+                # Stuff to draw boxes and save the file
+                    cv2.rectangle(result, top_left, bottom_right, (0, 0, 255), 1)
+                    #file_name_bbox = "blobs-%d-(%03d-%03d-%03d)_%d-bbox.png" % (i, peak[0], peak[1], peak[2], j)
+                    #cv2.imwrite(file_name_bbox, result)
+                    cv2.imshow("Frame", result)
+                    cv2.waitKey(10)
+
+        imc = copy.copy(ob)
+
+        for j, contour in enumerate(objs):
+            objects.append(ob[contour[0][1]:contour[1][1], contour[0][0]:contour[1][0]])
+
+        o_objects = len(objects)
+
+        # Check for duplicate objects
+        for i, obj in enumerate(objects):
+            try:
+                # Take care of templates that are the same but of different sizes
+                for k in range(i + 1, len(objects)):
+                    _, newx = max(enumerate([obj.shape[0], objects[k].shape[0]]))
+                    _, newy = max(enumerate([obj.shape[1], objects[k].shape[1]]))
+
+                    obj1 = cv2.resize(objects[k],(int(newx),int(newy)))
+                    obj2 = cv2.resize(obj,(int(newx),int(newy)))
+
+                    _, minxy = min(enumerate([obj1.shape[0], obj1.shape[1]]))
+
+                    ratio = int(8/minxy)
+                    if ratio > 1:
+                        obj2 = cv2.resize(obj2,(obj2.shape[1]*ratio, obj2.shape[0]*ratio))
+                        obj1 = cv2.resize(obj1,(obj1.shape[1]*ratio, obj1.shape[0]*ratio))
+
+                    res = ssim(obj1, obj2, multichannel=True)
+                    if res >= 0.7:
+                        objects.pop(k)
+                        objs.pop(k)
+            except:
+                b = 0
+
+        for j, contour in enumerate(objs):
+            vector[j*2] = (contour[0][0] + contour[1][0])/2
+            vector[j*2 + 1] = (contour[0][1] + contour[1][1])/2
 
         if self._key is None:
-            obs = self.frame_his
+            obs = vector
         else:
             obs = obs.copy()
-            obs[self._key] = self.frame_his
+            obs[self._key] = vector
         return obs
 
 class FrameStack(gym.Wrapper):
