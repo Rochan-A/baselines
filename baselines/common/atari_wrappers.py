@@ -353,11 +353,11 @@ class WarpFrame_feov(gym.ObservationWrapper):
                     objs.append([top_left, bottom_right])
 
                 # Stuff to draw boxes and save the file
-                    cv2.rectangle(result, top_left, bottom_right, (0, 0, 255), 1)
+                    #cv2.rectangle(result, top_left, bottom_right, (0, 0, 255), 1)
                     #file_name_bbox = "blobs-%d-(%03d-%03d-%03d)_%d-bbox.png" % (i, peak[0], peak[1], peak[2], j)
                     #cv2.imwrite(file_name_bbox, result)
-                    cv2.imshow("Frame", result)
-                    cv2.waitKey(10)
+                    #cv2.imshow("Frame", result)
+                    #cv2.waitKey(10)
 
         imc = copy.copy(ob)
 
@@ -391,9 +391,12 @@ class WarpFrame_feov(gym.ObservationWrapper):
             except:
                 b = 0
 
-        for j, contour in enumerate(objs):
-            vector[j*2] = (contour[0][0] + contour[1][0])/2
-            vector[j*2 + 1] = (contour[0][1] + contour[1][1])/2
+        try:
+            for j, contour in enumerate(objs):
+                vector[j*2] = (contour[0][0] + contour[1][0])/2
+                vector[j*2 + 1] = (contour[0][1] + contour[1][1])/2
+        except:
+            b = 0
 
         if self._key is None:
             obs = vector
