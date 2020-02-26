@@ -20,6 +20,13 @@ import skimage.color as color
 NUM_OBJECTS = 3		# MODIFIED FOR EXTERNAL OBJECT SET
 NUM_DUP = 1		# MODIFIED FOR EXTERNAL OBJECT SET
 
+def scale_linear_bycolumn(rawpoints, high=1.0, low=-1.0):
+    mins = np.min(rawpoints, axis=0)
+    maxs = np.max(rawpoints, axis=0)
+    rng = maxs - mins
+    return high - (((high - low) * (maxs - rawpoints)) / rng), rng
+
+
 class NoopResetEnv(gym.Wrapper):
     def __init__(self, env, noop_max=30):
         """Sample initial states by taking random number of no-ops on reset.
@@ -283,17 +290,14 @@ class WarpFrame_feov(gym.ObservationWrapper):
         self._key = dict_space_key
         self._num_objects = num_objects
 
-        #assert object_set != None
-        #self.object_set = np.load(object_set, allow_pickle=True)
-
         new_space = gym.spaces.Box(
             low=0,
             high=180,
             shape=(6, ),
-            dtype=np.uint8,
+            dtype=np.float32,
         )
 
-        #self.frame_his = np.zeros((4, self._num_objects*2), dtype=np.uint8)
+        self.vector = np.zeros((6), dtype=np.float32)
 
         if self._key is None:
             original_space = self.observation_space
@@ -309,8 +313,7 @@ class WarpFrame_feov(gym.ObservationWrapper):
         else:
             frame = obs[self._key]
 
-        vector = np.zeros((6), dtype=np.uint8)
-
+        # Crop Observation
         ob = frame[40:190]
 
         image_ = ob.reshape(-1, ob.shape[-1])
@@ -318,11 +321,7 @@ class WarpFrame_feov(gym.ObservationWrapper):
 
         _, counts = np.unique(image_, axis=0, return_counts = True)
 
-        #[[144  72  17]
-        # [213 130  74]
-        # [236 236 236]]
-
-        unique = np.delete(pix_values, np.where(counts == max(counts)), axis= 0)
+        unique = np.asarray([[92, 186, 92], [213, 130, 74], [236, 236, 236]])
 
         # Extract the location using the above pixel values
         # Array to store cordinates of boxes
@@ -351,13 +350,6 @@ class WarpFrame_feov(gym.ObservationWrapper):
                 # Save the box to a list (only if box size is greater than 8x8)
                 if bottom_right[1] - top_left[1] > 2 and bottom_right[0] - top_left[0] > 2:
                     objs.append([top_left, bottom_right])
-
-                # Stuff to draw boxes and save the file
-                    #cv2.rectangle(result, top_left, bottom_right, (0, 0, 255), 1)
-                    #file_name_bbox = "blobs-%d-(%03d-%03d-%03d)_%d-bbox.png" % (i, peak[0], peak[1], peak[2], j)
-                    #cv2.imwrite(file_name_bbox, result)
-                    #cv2.imshow("Frame", result)
-                    #cv2.waitKey(10)
 
         imc = copy.copy(ob)
 
@@ -393,16 +385,17 @@ class WarpFrame_feov(gym.ObservationWrapper):
 
         try:
             for j, contour in enumerate(objs):
-                vector[j*2] = (contour[0][0] + contour[1][0])/2
-                vector[j*2 + 1] = (contour[0][1] + contour[1][1])/2
+                self.vector[j*2] = 1.0 - (((2) * (150 - ((contour[0][0] + contour[1][0])/2))) / 150)
+                self.vector[j*2 + 1] = 1.0 - (((2) * (160 - ((contour[0][1] + contour[1][1])/2))) / 160)
+
         except:
             b = 0
 
         if self._key is None:
-            obs = vector
+            obs = self.vector
         else:
             obs = obs.copy()
-            obs[self._key] = vector
+            obs[self._key] = self.vector
         return obs
 
 class FrameStack(gym.Wrapper):
