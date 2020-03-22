@@ -293,11 +293,11 @@ class WarpFrame_feov(gym.ObservationWrapper):
         new_space = gym.spaces.Box(
             low=0,
             high=180,
-            shape=(6, ),
+            shape=(6*4, ),
             dtype=np.float32,
         )
 
-        self.vector = np.zeros((6), dtype=np.float32)
+        self.vector = np.zeros((6*4), dtype=np.float32)
 
         if self._key is None:
             original_space = self.observation_space
@@ -384,10 +384,10 @@ class WarpFrame_feov(gym.ObservationWrapper):
                 b = 0
 
         try:
+            self.vector = np.roll(self.vector, 6)
             for j, contour in enumerate(objs):
                 self.vector[j*2] = 1.0 - (((2) * (150 - ((contour[0][0] + contour[1][0])/2))) / 150)
                 self.vector[j*2 + 1] = 1.0 - (((2) * (160 - ((contour[0][1] + contour[1][1])/2))) / 160)
-
         except:
             b = 0
 
